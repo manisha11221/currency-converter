@@ -4,7 +4,7 @@ import {app} from './app.js'
 
 dotenv.config()
 
-
+console.log("This is port", process.env.PORT)
 
 connectDB()
 .then(() => {
