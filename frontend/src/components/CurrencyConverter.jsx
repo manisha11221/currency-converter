@@ -1,194 +1,202 @@
-import { useEffect, useState } from 'react'
-import axios from 'axios'
-import { toast } from 'react-toastify'
-import { URI } from '../const'
+import { useEffect, useState, useCallback } from 'react';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import { URI } from '../const';
 
-const API_PRIMARY = 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1'
-const API_FALLBACK = 'https://latest.currency-api.pages.dev/v1'
-const BACKEND_BASE = `${URI}/api/v1/transiction`
+const API_PRIMARY = 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1';
+const API_FALLBACK = 'https://latest.currency-api.pages.dev/v1';
+const BACKEND_BASE = `${URI}/api/v1/transiction`;
 
 export default function CurrencyConverter() {
-  const [currencies, setCurrencies] = useState({})
-  const [from, setFrom] = useState('usd')
-  const [to, setTo] = useState('inr')
-  const [amount, setAmount] = useState('')
-  const [result, setResult] = useState(null)
-  const [history, setHistory] = useState([])
+  const [currencies, setCurrencies] = useState({});
+  const [from, setFrom] = useState('usd');
+  const [to, setTo] = useState('inr');
+  const [amount, setAmount] = useState('');
+  const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
 
-  // Fetch currencies and transactions
-  useEffect(() => {
-    const fetchCurrencies = async () => {
-      try {
-        const res = await axios.get(`${API_PRIMARY}/currencies.json`)
-        setCurrencies(res.data)
-      } catch {
-        try {
-          const res = await axios.get(`${API_FALLBACK}/currencies.json`)
-          setCurrencies(res.data)
-        } catch (err) {
-          console.error('Failed to fetch currencies', err)
-        }
-      }
+  const token = localStorage.getItem("token");
+
+  const fetchWithFallback = async (primaryUrl, fallbackUrl) => {
+    try {
+      const res = await axios.get(primaryUrl);
+      return res.data;
+    } catch {
+      const fallbackRes = await axios.get(fallbackUrl);
+      return fallbackRes.data;
     }
+  };
 
-    const fetchHistory = async () => {
-      try {
-    const token = localStorage.getItem("token");
-    const res = await axios.get(`${BACKEND_BASE}/get`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-      setHistory(res.data.data); 
-  } catch (err) {
-        console.error("Failed to fetch history from backend", err)
-      }
+  const fetchCurrencies = useCallback(async () => {
+    try {
+      const data = await fetchWithFallback(
+        `${API_PRIMARY}/currencies.json`,
+        `${API_FALLBACK}/currencies.json`
+      );
+      setCurrencies(data);
+    } catch (err) {
+      console.error('Failed to fetch currencies', err);
+      toast.error('Failed to load currencies.');
     }
+  }, []);
 
-    fetchCurrencies()
-    fetchHistory()
-  }, [])
-
-  const convertCurrency = async () => {
-    if (!amount || isNaN(amount)) return toast.warn('Please enter a valid amount.')
+  const fetchHistory = useCallback(async () => {
+    if (!token) return;
 
     try {
-      const url = `${API_PRIMARY}/currencies/${from}.json`
-      const fallbackUrl = `${API_FALLBACK}/currencies/${from}.json`
+      const res = await axios.get(`${BACKEND_BASE}/get`, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
+      });
+      setHistory(res.data.data || []);
+    } catch (err) {
+      console.error("Failed to fetch history", err);
+    }
+  }, [token]);
 
-      let data
-      try {
-        const res = await axios.get(url)
-        data = res.data
-      } catch {
-        const res = await axios.get(fallbackUrl)
-        data = res.data
-      }
+  useEffect(() => {
+    fetchCurrencies();
+    fetchHistory();
+  }, [fetchCurrencies, fetchHistory]);
 
-      const rate = data[from]?.[to]
-      if (!rate) return toast.error(`No exchange rate found for ${to.toUpperCase()}`)
+  const convertCurrency = async () => {
+    if (!amount || isNaN(amount)) return toast.warn('Please enter a valid amount.');
 
-      const converted = (amount * rate).toFixed(2)
-      setResult(converted)
+    try {
+      const data = await fetchWithFallback(
+        `${API_PRIMARY}/currencies/${from}.json`,
+        `${API_FALLBACK}/currencies/${from}.json`
+      );
+
+      const rate = data[from]?.[to];
+      if (!rate) return toast.error(`No exchange rate found for ${to.toUpperCase()}`);
+
+      const converted = (amount * rate).toFixed(2);
+      setResult(converted);
 
       const newTransaction = {
         from: from.toUpperCase(),
         to: to.toUpperCase(),
         amount: Number(amount),
-        result: Number(converted)
+        result: Number(converted),
+      };
+
+      // Save transaction to backend
+      if (token) {
+        await axios.post(`${BACKEND_BASE}/add`, newTransaction, {
+          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
+        });
       }
 
-      // Save to backend
-      await axios.post(`${BACKEND_BASE}/add`, newTransaction, {withCredentials: true})
-
-      // Update frontend history
-      const updated = [newTransaction, ...history].slice(0, 5)
-      setHistory(updated)
+      setHistory((prev) => [newTransaction, ...prev].slice(0, 5));
     } catch (err) {
-      console.error('Error converting currency:', err)
-      toast.error('Something went wrong while converting. Please try again.')
+      console.error('Conversion error:', err);
+      toast.error('Something went wrong while converting. Please try again.');
     }
-  }
+  };
 
   return (
-    <main className="min-h-screen  text-gray-800 px-4 py-10 dark:bg-gray-900 dark:text-white transition">
+    <main className="min-h-screen text-gray-800 px-4 py-10 dark:bg-gray-900 dark:text-white transition">
       <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-6 sm:p-8 space-y-8">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl sm:text-3xl font-bold">💱 Currency Converter</h1>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="block mb-1 text-sm font-medium">From</label>
-            <select
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="w-full p-2 rounded-md border dark:bg-gray-700 dark:border-gray-600"
-            >
-              {Object.entries(currencies).map(([code, name]) => (
-                <option key={code} value={code}>
-                  {code.toUpperCase()} - {name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block mb-1 text-sm font-medium">To</label>
-            <select
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="w-full p-2 rounded-md border dark:bg-gray-700 dark:border-gray-600"
-            >
-              {Object.entries(currencies).map(([code, name]) => (
-                <option key={code} value={code}>
-                  {code.toUpperCase()} - {name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block mb-1 text-sm font-medium">Amount</label>
-            <input
-              type="text"
-              value={amount}
-              onChange={(e) => {
-                const value = e.target.value;
-                if (/^\d*\.?\d*$/.test(value)) {
-                  setAmount(value);
-                }
-                if (result) {
-                  setResult(null);
-                }
-              }}
-              placeholder="Enter amount"
-              className="w-full p-2 rounded-md border dark:bg-gray-700 dark:border-gray-600"
-            />
-          </div>
+          <CurrencySelect label="From" value={from} onChange={setFrom} currencies={currencies} />
+          <CurrencySelect label="To" value={to} onChange={setTo} currencies={currencies} />
+          <AmountInput value={amount} onChange={setAmount} onReset={() => setResult(null)} />
         </div>
 
         <div className="text-center">
           <button
             onClick={convertCurrency}
-            className="bg-blue-600 hover:bg-blue-700 cursor-pointer text-white px-6 py-2 rounded-lg font-semibold transition"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition"
           >
             Convert
           </button>
         </div>
 
         {result && (
-          <div className="text-center text-lg font-medium text-green-600 dark:text-green-400 wrap-break-word">
+          <div className="text-center text-lg font-medium text-green-600 dark:text-green-400">
             {amount} {from.toUpperCase()} = {result} {to.toUpperCase()}
           </div>
         )}
 
-        <div>
-          <h3 className="text-lg font-semibold mb-3">🕘 Recent Transactions</h3>
-          {history.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">No recent transactions.</p>
-          ) : (
-            <ul className="space-y-2">
-              {history.map((item, idx) => (
-                <li
-                  key={idx}
-                  onClick={() => {
-                    setFrom(item.from.toLowerCase())
-                    setTo(item.to.toLowerCase())
-                    setAmount(item.amount.toString())
-                    setResult(item.result.toFixed(2))
-                  }}
-                  className="cursor-pointer p-3 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition wrap-break-word"
-                >
-                  <strong>{item.amount}</strong> {item.from} → <strong>{item.result}</strong>{' '}
-                  {item.to} <span className="text-xs">({item.date || 'from DB'})</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <a href='/logout' className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Logout</a>
+        <TransactionHistory history={history} setFrom={setFrom} setTo={setTo} setAmount={setAmount} setResult={setResult} />
+
+        <a href="/logout" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Logout</a>
       </div>
     </main>
-  )
+  );
+}
+
+// Subcomponents
+
+function CurrencySelect({ label, value, onChange, currencies }) {
+  return (
+    <div>
+      <label className="block mb-1 text-sm font-medium">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full p-2 rounded-md border dark:bg-gray-700 dark:border-gray-600"
+      >
+        {Object.entries(currencies).map(([code, name]) => (
+          <option key={code} value={code}>
+            {code.toUpperCase()} - {name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function AmountInput({ value, onChange, onReset }) {
+  return (
+    <div>
+      <label className="block mb-1 text-sm font-medium">Amount</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          const val = e.target.value;
+          if (/^\d*\.?\d*$/.test(val)) onChange(val);
+          if (onReset) onReset();
+        }}
+        placeholder="Enter amount"
+        className="w-full p-2 rounded-md border dark:bg-gray-700 dark:border-gray-600"
+      />
+    </div>
+  );
+}
+
+function TransactionHistory({ history, setFrom, setTo, setAmount, setResult }) {
+  return (
+    <div>
+      <h3 className="text-lg font-semibold mb-3">🕘 Recent Transactions</h3>
+      {history.length === 0 ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">No recent transactions.</p>
+      ) : (
+        <ul className="space-y-2">
+          {history.map((item, idx) => (
+            <li
+              key={idx}
+              onClick={() => {
+                setFrom(item.from.toLowerCase());
+                setTo(item.to.toLowerCase());
+                setAmount(item.amount.toString());
+                setResult(item.result.toFixed(2));
+              }}
+              className="cursor-pointer p-3 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+            >
+              <strong>{item.amount}</strong> {item.from} → <strong>{item.result}</strong> {item.to}{' '}
+              <span className="text-xs">({item.date || 'from DB'})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
