@@ -1,5 +1,5 @@
 
-const URI = 'http://localhost:8000';
+const URI = 'https://currency-converter-1-ircv.onrender.com/';
 
 
 export { URI };
